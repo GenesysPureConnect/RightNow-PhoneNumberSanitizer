@@ -12,16 +12,42 @@ namespace RightNowPhoneNumberSanitizer
     class Program
     {
         private static ClientInfoHeader s_clientInfoHeader;
-        private static bool s_trimLeadingOne = true;
+        const int PageSize = 100;
 
         static void Main(string[] args)
         {
-            s_clientInfoHeader = new ClientInfoHeader();
-            s_clientInfoHeader.AppID = "Phone Number Sanitizer";
+            Console.Clear();
 
-            var client = SetupConnection("https://inindev0513.rightnowdemo.com/cgi-bin/inindev0513.cfg/services/soap", "Admin1", "Admin1234");
-            GetAllContacts(client);
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("usage is ");
+                Console.WriteLine();
+                Console.WriteLine("RightNowPhoneNumberSanitizer.exe RIGHTNOWURL USERNAME PASSWORD");
+                Console.WriteLine();
+                Console.WriteLine("RIGHTNOWURL should be in the format https://inindev0513.rightnowdemo.com/cgi-bin/inindev0513.cfg/services/soap");
+                Console.WriteLine("User name and password are for a user that has rights to update records in RightNow");
+                Console.WriteLine();
+            }
+            else
+            {
+                try
+                {
+                    s_clientInfoHeader = new ClientInfoHeader();
+                    s_clientInfoHeader.AppID = "Phone Number Sanitizer";
 
+                    var client = SetupConnection(args[0], args[1], args[2]);
+                    GetAllContacts(client);
+                    Console.ReadLine();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("ERROR: " + ex.Message);
+                }
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Press any key to quit...");
+            Console.Read();
         }
 
     
@@ -32,19 +58,15 @@ namespace RightNowPhoneNumberSanitizer
             contactTemplate.Phones = new Phone[] { };
 
             UpdateProcessingOptions options = new UpdateProcessingOptions();
-           // options.SuppressExternalEvents = true;
-            //options.SuppressRules = true;
 
             RNObject[] objectTemplates = new RNObject[] { contactTemplate };
             bool hasMoreResults = true;
 
-            const int PageSize = 100;
             int currentOffset = 0;
 
             do
             {
-               // var resultTable = client.QueryObjects(s_clientInfoHeader, String.Format("SELECT Contact FROM Contact LIMIT {0} OFFSET {1}", PageSize, currentOffset), objectTemplates, PageSize);
-                var resultTable = client.QueryObjects(s_clientInfoHeader, String.Format("SELECT Contact FROM Contact C WHERE C.Phones.RawNumber LIKE '%{0}'", "9154929469"), objectTemplates, PageSize);
+                var resultTable = client.QueryObjects(s_clientInfoHeader, String.Format("SELECT Contact FROM Contact LIMIT {0} OFFSET {1}", PageSize, currentOffset), objectTemplates, PageSize);
 
                 RNObject[] rnObjects = resultTable[0].RNObjectsResult;
 
@@ -56,18 +78,34 @@ namespace RightNowPhoneNumberSanitizer
                     Phone[] phones = contact.Phones;
                     if (phones != null)
                     {
+                        List<Phone> newPhoneNumbers = new List<Phone>();
+
                         foreach (Phone phone in phones)
                         {
-                            System.Console.WriteLine(contact.Name.Last + " - " + phone.Number + "(" + phone.RawNumber +") - " + SanitizeNumber(phone.Number));
-                            phone.Number = SanitizeNumber(phone.Number);
-                            phone.RawNumber = phone.Number;
-                        }
+                            var sanitizedNumber = SanitizeNumber(phone.Number);
 
-                        updatedObjects.Add(new Contact()
+                            System.Console.WriteLine(contact.Name.Last + " - " + phone.Number + " (" + phone.RawNumber +") - " + sanitizedNumber);
+                            if (sanitizedNumber != phone.Number)
+                            {
+                                //need to create a new Phone object, if we reuse/update the existing one, the update won't work. 
+                                var newNumber = new Phone()
+                                {
+                                    action = ActionEnum.update,
+                                    actionSpecified = true,
+                                    Number = SanitizeNumber(phone.Number),
+                                    PhoneType = phone.PhoneType
+                                };
+                                newPhoneNumbers.Add(newNumber);
+                            }
+                        }
+                        if (newPhoneNumbers.Count > 0)
                         {
-                            ID = contact.ID,
-                            Phones = phones
-                        });
+                            updatedObjects.Add(new Contact()
+                            {
+                                ID = contact.ID,
+                                Phones = newPhoneNumbers.ToArray(),
+                            });
+                        }
                     }
                 }
 
@@ -83,16 +121,13 @@ namespace RightNowPhoneNumberSanitizer
             } while (hasMoreResults);
         }
 
-        static string SanitizeNumber(string number)
+        private static string SanitizeNumber(string number)
         {
-            var newNumber = Regex.Replace(number,@"\D",String.Empty);
-
-            if (s_trimLeadingOne && newNumber.StartsWith("1") && newNumber.Length == 11)
+            if (String.IsNullOrEmpty(number))
             {
-                newNumber = newNumber.Substring(1);
+                return number;
             }
-
-            return newNumber;
+            return Regex.Replace(number, "\\D", String.Empty);
         }
 
         static RightNowSyncPortClient SetupConnection(string endpointAddress, string user, string password)
