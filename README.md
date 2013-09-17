@@ -1,4 +1,4 @@
-Removes number formatting from all users phone numbers.
+Removes number formatting from all contact phone numbers.
 
 Execute from the command line
 
